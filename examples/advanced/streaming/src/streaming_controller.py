@@ -22,14 +22,24 @@ from nvflare.apis.fl_context import FLContext
 from nvflare.apis.impl.controller import Controller
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.signal import Signal
+from nvflare.app_common.abstract.fl_model import FLModel
 from nvflare.app_common.streamers.container_retriever import ContainerRetriever
 from nvflare.app_common.streamers.file_retriever import FileRetriever
+from nvflare.app_common.utils.fl_model_utils import FLModelUtils
 from nvflare.fuel.utils.log_utils import custom_logger
 
 
 class StreamingController(Controller):
-    def __init__(self, retriever_mode=None, retriever_id=None, task_timeout=200, task_check_period: float = 0.5):
+    def __init__(
+        self,
+        model_name: str = "meta-llama/llama-3.2-1b",
+        retriever_mode=None,
+        retriever_id=None,
+        task_timeout=200,
+        task_check_period: float = 0.5,
+    ):
         Controller.__init__(self, task_check_period=task_check_period)
+        self.model_name = model_name
         self.retriever_mode = retriever_mode
         self.retriever_id = retriever_id
         self.retriever = None
@@ -66,6 +76,9 @@ class StreamingController(Controller):
                         )
                         return
                     self.retriever = c
+                elif self.retriever_mode == "tensor":
+                    # nothing to do
+                    return
                 else:
                     self.system_panic(
                         f"invalid retriever_mode {self.retriever_mode}",
@@ -74,14 +87,18 @@ class StreamingController(Controller):
                     return
 
     def control_flow(self, abort_signal: Signal, fl_ctx: FLContext):
-        s = Shareable()
-        # set shareable payload
         if self.retriever_mode == "container":
+            s = Shareable()
             s["model"] = "model"
         elif self.retriever_mode == "file":
+            s = Shareable()
             s["model"] = self.file_name
+        elif self.retriever_mode == "tensor":
+            s = FLModelUtils.to_shareable(FLModel(params=self.model))
         else:
+            s = Shareable()
             s["model"] = self.model
+
         task = Task(name="retrieve_model", data=s, timeout=self.task_timeout)
         self.broadcast_and_wait(
             task=task,
@@ -107,12 +124,10 @@ class StreamingController(Controller):
     ):
         pass
 
-    @staticmethod
-    def _get_test_model():
-        model_name = "meta-llama/llama-3.2-1b"
+    def _get_test_model(self):
         # load model to dict
         model = AutoModelForCausalLM.from_pretrained(
-            model_name,
+            self.model_name,
             torch_dtype=torch.float32,
             device_map="auto",
             use_cache=False,

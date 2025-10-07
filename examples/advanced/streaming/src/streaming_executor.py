@@ -24,6 +24,7 @@ from nvflare.apis.shareable import Shareable, make_reply
 from nvflare.apis.signal import Signal
 from nvflare.app_common.streamers.container_retriever import ContainerRetriever
 from nvflare.app_common.streamers.file_retriever import FileRetriever
+from nvflare.app_common.utils.fl_model_utils import FLModelUtils
 from nvflare.fuel.utils.log_utils import custom_logger
 
 
@@ -58,6 +59,9 @@ class StreamingExecutor(Executor):
                         )
                         return
                     self.retriever = c
+                elif self.retriever_mode == "tensor":
+                    # nothing to do
+                    return
                 else:
                     self.system_panic(
                         f"invalid retriever_mode {self.retriever_mode}",
@@ -68,13 +72,18 @@ class StreamingExecutor(Executor):
     def execute(self, task_name: str, shareable: Shareable, fl_ctx: FLContext, abort_signal: Signal) -> Shareable:
         self.log_info(fl_ctx, f"got task {task_name}")
         if task_name == "retrieve_model":
-            model = shareable.get("model")
+            if self.retriever_mode in ("container", "file", None):
+                model = shareable.get("model")
+            else:
+                model = FLModelUtils.from_shareable(shareable)
             if not model:
                 self.log_error(fl_ctx, "missing model info in request")
                 return make_reply(ReturnCode.BAD_TASK_DATA)
-
             if self.retriever_mode is None:
-                self.log_info(fl_ctx, f"received container type: {type(model)} size: {len(model)}")
+                self.log_info(fl_ctx, f"received regular type: {type(model)} size: {len(model)}")
+                return make_reply(ReturnCode.OK)
+            elif self.retriever_mode == "tensor":
+                self.log_info(fl_ctx, f"received tensor type: {type(model.params)} size: {len(model.params)}")
                 return make_reply(ReturnCode.OK)
             elif self.retriever_mode == "container":
                 rc, result = self.retriever.retrieve_container(
@@ -105,7 +114,6 @@ class StreamingExecutor(Executor):
                 # Load local model
                 result = dict(np.load(rename_path))
                 self.log_info(fl_ctx, f"loaded file content type: {type(result)} size: {len(result)}")
-
                 return make_reply(ReturnCode.OK)
         else:
             self.log_error(fl_ctx, f"got unknown task {task_name}")

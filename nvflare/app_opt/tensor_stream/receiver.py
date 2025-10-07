@@ -101,8 +101,7 @@ class TensorReceiver:
         peer_name = fl_ctx.get_peer_context().get_identity_name()
         tensors = self.tensors.pop(peer_name, None)
         if not tensors:
-            msg = f"No tensors found in FLContext for peer {peer_name} to be set."
-            self.logger.warning(msg)
+            self.logger.warning(f"No tensors found in FLContext for peer {peer_name} to be set.")
             return
 
         s: Shareable = fl_ctx.get_prop(self.ctx_prop_key)
