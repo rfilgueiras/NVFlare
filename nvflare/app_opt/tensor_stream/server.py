@@ -120,7 +120,6 @@ class TensorServerStreamer(FLComponent):
             self.try_to_clean_task_data(num_clients, fl_ctx)
         elif event_type == EventType.BEFORE_TASK_RESULT_FILTER:
             self.receiver.set_ctx_with_tensors(fl_ctx)
-            self.receiver.tensors.clear()  # clear previous received tensors
 
     def reset_counters(self):
         """Reset the counters for the number of task data sent and skipped."""
@@ -130,6 +129,10 @@ class TensorServerStreamer(FLComponent):
                 self.num_task_skipped = 0
                 self.start_sending_time = None
                 self.data_cleaned = False
+                # Clear sender to release any references to tensors or root_keys
+                if self.sender:
+                    self.sender.root_keys.clear()
+                    self.sender = None
 
     def send_tensors_to_client(self, fl_ctx: FLContext):
         """Send tensors to the client after task data filtering.

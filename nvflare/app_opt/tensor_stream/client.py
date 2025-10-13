@@ -112,3 +112,6 @@ class TensorClientStreamer(FLComponent):
         """
         if self.sender.send(fl_ctx, self.entry_timeout):
             clean_task_result(fl_ctx)
+            # Clear sender root_keys after successful send to free memory
+            self.sender.root_keys.clear()
+            self.sender = None
