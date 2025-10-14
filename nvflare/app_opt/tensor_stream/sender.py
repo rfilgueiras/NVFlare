@@ -43,7 +43,6 @@ class TensorSender:
         """
         self.engine = engine
         self.ctx_prop_key = ctx_prop_key
-        self.root_keys = []
         self.format = format
         self.tasks = tasks
         self.channel = channel
@@ -60,9 +59,10 @@ class TensorSender:
             fl_ctx (FLContext): The FLContext for the current operation.
         """
         peer_name = fl_ctx.get_peer_context().get_identity_name()
+        task_id = fl_ctx.get_prop(FLContextKey.TASK_ID, None)
+        if not task_id:
+            raise ValueError("No task_id found in FLContext.")
         targets = get_targets_for_ctx_and_prop_key(fl_ctx, self.ctx_prop_key)
-
-        self.logger.debug(f"Sending tensors to peer: {peer_name}")
 
         try:
             dxo = get_dxo_from_ctx(fl_ctx, self.ctx_prop_key, self.tasks)
@@ -70,19 +70,21 @@ class TensorSender:
             self.logger.warning(f"{exc} Nothing to send.")
             return False
 
+        root_keys = []
         for key, value in dxo.data.items():
             # auto-detect tensor stored on root keys
-            if not isinstance(value, dict) and "" not in self.root_keys:
-                self.root_keys.append("")
-            elif isinstance(value, dict) and key not in self.root_keys:
-                self.root_keys.append(key)
+            if not isinstance(value, dict) and "" not in root_keys:
+                root_keys.append("")
+            elif isinstance(value, dict) and key not in root_keys:
+                root_keys.append(key)
 
-        for key in self.root_keys:
+        for key in root_keys:
             tensors = get_tensors_from_dxo(dxo, key, self.format)
-            producer = TensorProducer(tensors, entry_timeout, root_key=key)
-            msg = f"Starting to send tensors to peer '{peer_name}'. "
+            producer = TensorProducer(tensors, task_id, entry_timeout, root_key=key)
+            msg = f"Starting to send tensors to peer '{peer_name}'."
             if key:
-                msg += f"With root key '{key}'"
+                msg += f" Root Key: '{key}'."
+            msg += f" Task ID: '{task_id}'."
             self.logger.info(msg)
             self._send_tensors(targets, producer, fl_ctx)
             # Explicitly delete tensors after streaming to free memory
