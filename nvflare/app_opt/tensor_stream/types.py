@@ -17,7 +17,6 @@ from typing import Union
 import torch
 
 TENSORS_CHANNEL = "tensor_stream"
-SAFE_TENSORS_PROP_KEY = "_safe_tensors_blob_"
 
 TensorsMap = Union[dict[str, torch.Tensor], dict[str, dict[str, torch.Tensor]]]
 
@@ -35,5 +34,9 @@ class TensorTopics:
 class TensorBlobKeys:
     SAFETENSORS_BLOB = "safetensors_blob"
     TENSOR_KEYS = "tensor_keys"
-    ROOT_KEY = "root_key"
     TASK_ID = "task_id"
+    PARENT_KEYS = "parent_keys"
+
+
+class TensorEventTypes:
+    SEND_TENSORS_FOR_TASK_DATA = "SEND_TENSORS_FOR_TASK_DATA"

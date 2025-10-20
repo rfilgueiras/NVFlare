@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import threading
 import time
 
 from nvflare.apis.dxo import DataKind
@@ -24,7 +25,7 @@ from nvflare.fuel.utils.log_utils import get_obj_logger
 
 from .consumer import TensorConsumerFactory
 from .types import TENSORS_CHANNEL, TensorCustomKeys, TensorsMap
-from .utils import get_topic_for_ctx_prop_key, to_numpy_recursive
+from .utils import get_topic_for_ctx_prop_key, merge_params_dicts
 
 
 class TensorReceiver:
@@ -36,7 +37,6 @@ class TensorReceiver:
         ctx_prop_key: FLContextKey,
         format: ExchangeFormat = ExchangeFormat.PYTORCH,
         channel: str = TENSORS_CHANNEL,
-        wait_for_save_tensors_cb_secs: float = 5.0,
     ):
         """Initialize the TensorReceiver.
 
@@ -51,9 +51,10 @@ class TensorReceiver:
         self.ctx_prop_key = ctx_prop_key
         self.format = format
         self.channel = channel
-        self.wait_for_save_tensors_cb_secs = wait_for_save_tensors_cb_secs
-        # key: peer_name, value: tensors received from the peer
+        # key: task_id, value: tensors received from the peer
         self.tensors: dict[str, TensorsMap] = {}
+        self.tensor_events = {}  # Maps task_id to Event objects
+        self.lock = threading.Lock()
         self.logger = get_obj_logger(self)
         self._register()
 
@@ -83,6 +84,10 @@ class TensorReceiver:
         if not task_id:
             raise ValueError(f"No task_id found from peer {peer_name}.")
 
+        with self.lock:
+            if task_id not in self.tensor_events:
+                self.tensor_events[task_id] = threading.Event()
+
         if not success:
             raise ValueError(f"Failed to receive tensors from peer '{peer_name}' and task '{task_id}'.")
 
@@ -90,15 +95,11 @@ class TensorReceiver:
         if not tensors:
             raise ValueError(f"No tensors found from peer '{peer_name}' and task '{task_id}'.")
 
-        # add or update (when multiple root keys are present) the tensors received from the same task_id
-        if task_id not in self.tensors:
-            self.tensors[task_id] = tensors
-        else:
-            self.tensors[task_id].update(tensors)
-
         # Clean up custom properties to reduce memory usage
         fl_ctx.set_custom_prop(TensorCustomKeys.SAFE_TENSORS_PROP_KEY, None)
         fl_ctx.set_custom_prop(TensorCustomKeys.TASK_ID, None)
+
+        self.on_tensor_received(task_id, tensors)
         del tensors
 
     def set_ctx_with_tensors(self, fl_ctx: FLContext):
@@ -107,27 +108,13 @@ class TensorReceiver:
         Args:
             fl_ctx (FLContext): The FLContext for the current operation.
         """
+        peer_name = fl_ctx.get_peer_context().get_identity_name()
         task_id = fl_ctx.get_prop(FLContextKey.TASK_ID, None)
         if not task_id:
             raise ValueError("No task_id found in FLContext.")
 
-        # there is a race condition where the event is fired before the tensors are set in self.tensors
-        # wait for a short period of time to allow the callback to set the tensors
-        start_wait = time.time()
-        while task_id not in self.tensors:
-            self.logger.debug(f"Waiting for tensors for task_id '{task_id}'...")
-            time.sleep(0.1)  # wait for tensors to be received
-            if time.time() - start_wait > self.wait_for_save_tensors_cb_secs:
-                self.logger.error(f"Timeout waiting for tensors for task_id '{task_id}'.")
-                return  # exit without setting tensors
-
-        peer_name = fl_ctx.get_peer_context().get_identity_name()
-        tensors = self.tensors.pop(task_id, None)
-        if not tensors:
-            msg = f"No tensors found in FLContext for peer '{peer_name}' and task '{task_id}' to be set."
-            self.logger.warning(msg)
-            return
-
+        # get and remove the tensors from the local store
+        tensors = self.tensors.pop(task_id)
         s: Shareable = fl_ctx.get_prop(self.ctx_prop_key)
         if not s:
             msg = f"No shareable found in FLContext for key {self.ctx_prop_key}."
@@ -153,9 +140,9 @@ class TensorReceiver:
             raise RuntimeError(msg)
 
         if self.format == ExchangeFormat.PYTORCH:
-            dxo["data"] = tensors
+            dxo["data"] = merge_params_dicts(dxo["data"], tensors)
         elif self.format == ExchangeFormat.NUMPY:
-            dxo["data"] = to_numpy_recursive(tensors)
+            dxo["data"] = merge_params_dicts(dxo["data"], tensors, to_ndarray=True)
         else:
             msg = f"Unsupported tensor format: {self.format}"
             self.logger.error(msg)
@@ -166,8 +153,41 @@ class TensorReceiver:
 
         # Explicitly delete local reference to aid garbage collection
         del tensors
+        del self.tensor_events[task_id]
 
         self.logger.info(
             f"Peer '{fl_ctx.get_identity_name()}': updated task data with tensors received from peer "
             f"'{peer_name}'. Task ID: '{task_id}'."
         )
+
+    def wait_for_tensors(self, task_id: str, peer_name: str, timeout: float = 5.0):
+        """Wait for tensors to be received for a specific task ID.
+
+        Args:
+            task_id (str): The task ID to wait for.
+            peer_name (str): The peer name associated with the task.
+            timeout (float): The maximum time to wait in seconds.
+        """
+        start_wait = time.time()
+
+        # Create an event for this task if it doesn't exist
+        with self.lock:
+            if task_id not in self.tensor_events:
+                self.tensor_events[task_id] = threading.Event()
+            event = self.tensor_events[task_id]
+
+        # Wait for the event with timeout
+        remaining_timeout = timeout - (time.time() - start_wait)
+        if not event.wait(timeout=remaining_timeout):
+            raise TimeoutError(f"No tensors received from peer '{peer_name}'. Task ID: '{task_id}'.")
+
+    def on_tensor_received(self, task_id: str, tensor: TensorsMap):
+        """Callback when tensors are received.
+
+        Args:
+            task_id (str): The task ID associated with the tensors.
+            tensor (TensorsMap): The tensors received.
+        """
+        with self.lock:
+            self.tensors[task_id] = tensor
+            self.tensor_events[task_id].set()  # Wake up waiting threads
