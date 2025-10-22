@@ -23,3 +23,4 @@ class Mode(str, Enum):
 class PipeChannelName:
     TASK = "task"
     METRIC = "metric"
+    TENSOR = "tensor"

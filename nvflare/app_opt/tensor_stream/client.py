@@ -18,7 +18,9 @@ from nvflare.apis.fl_constant import FLContextKey
 from nvflare.apis.fl_context import FLContext
 from nvflare.apis.shareable import Shareable
 from nvflare.apis.streaming import StreamableEngine
-from nvflare.client.config import ExchangeFormat
+from nvflare.client.config import ConfigKey, ExchangeFormat
+from nvflare.fuel.utils.constants import PipeChannelName
+from nvflare.fuel.utils.pipe.pipe import Pipe
 
 from .receiver import TensorReceiver
 from .sender import TensorSender
@@ -32,7 +34,7 @@ class TensorClientStreamer(FLComponent):
     It uses a StreamableEngine, TensorReceiver, and TensorSender to manage tensor streaming on the client side.
     Attributes:
         format (str): The format of the tensors to send. Default is "pytorch".
-        entry_timeout (float): Timeout for tensor entry transfer operations. Default is 30.0 seconds.
+        entry_timeout (float): Timeout for tensor entry transfer operations. Default is 60.0 seconds.
         engine (StreamableEngine): The StreamableEngine used for tensor streaming.
         sender (TensorSender): The TensorSender used to send tensors to the server.
         receiver (TensorReceiver): The TensorReceiver used to receive tensors from the server.
@@ -49,7 +51,11 @@ class TensorClientStreamer(FLComponent):
         tasks: list[str] = None,
         enable_request_task_data_tensors: bool = False,
         wait_for_task_data_tensors_timeout: float = 90.0,
-        entry_timeout=30.0,
+        entry_timeout=60.0,
+        pipe_id: str = "",
+        pipe_read_interval=0.1,
+        pipe_heartbeat_interval=5.0,
+        pipe_heartbeat_timeout=60.0,
     ):
         """Initialize the TensorClientStreamer component.
 
@@ -66,6 +72,12 @@ class TensorClientStreamer(FLComponent):
         self.enable_request_task_data_tensors = enable_request_task_data_tensors
         self.wait_for_task_data_tensors_timeout = wait_for_task_data_tensors_timeout
         self.entry_timeout = entry_timeout
+        self.pipe_id = pipe_id
+        self.pipe_channel_name = PipeChannelName.TENSOR
+        self.pipe_read_interval = pipe_read_interval
+        self.pipe_heartbeat_interval = pipe_heartbeat_interval
+        self.pipe_heartbeat_timeout = pipe_heartbeat_timeout
+        self.pipe = None
         self.engine: StreamableEngine = None
         self.sender: TensorSender = None
         self.receiver: TensorReceiver = None
@@ -92,6 +104,16 @@ class TensorClientStreamer(FLComponent):
             self.receiver = TensorReceiver(engine, FLContextKey.TASK_DATA, self.format)
         except Exception as e:
             self.system_panic(str(e), fl_ctx)
+            return
+
+        if not self.pipe_id:
+            self.log_info(fl_ctx, "No pipe_id provided, skipping pipe initialization.")
+            return
+
+        pipe = engine.get_component(self.pipe_id)
+        if not isinstance(pipe, Pipe):
+            self.log_error(fl_ctx, f"component {self.pipe_id} must be Pipe but got {type(pipe)}")
+            self.system_panic(f"bad component {self.pipe_id}", fl_ctx)
             return
 
     def handle_event(self, event_type: str, fl_ctx: FLContext):
@@ -154,3 +176,15 @@ class TensorClientStreamer(FLComponent):
             clean_task_result(fl_ctx)
             # Clear sender to release any references to tensors
             self.sender = None
+
+    def export(self, export_mode: str) -> tuple[str, dict]:
+        pipe_export_class, pipe_export_args = self.pipe.export(export_mode)
+        config_dict = {
+            ConfigKey.PIPE_CHANNEL_NAME: self.pipe_channel_name,
+            ConfigKey.PIPE: {
+                ConfigKey.CLASS_NAME: pipe_export_class,
+                ConfigKey.ARG: pipe_export_args,
+            },
+            ConfigKey.HEARTBEAT_TIMEOUT: self.pipe_heartbeat_timeout,
+        }
+        return ConfigKey.METRICS_EXCHANGE, config_dict

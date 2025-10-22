@@ -22,6 +22,7 @@ from nvflare.fuel.data_event.data_bus import DataBus
 
 from .api_spec import CLIENT_API_KEY, CLIENT_API_TYPE_KEY, APISpec
 from .ex_process.api import ExProcessClientAPI
+from .ex_process.api_tensor_stream import ExProcessTensorStreamClientAPI
 from .in_process.api import InProcessClientAPI
 
 DEFAULT_CONFIG = f"config/{CLIENT_API_CONFIG}"
@@ -31,6 +32,7 @@ data_bus = DataBus()
 class ClientAPIType(Enum):
     IN_PROCESS_API = "IN_PROCESS_API"
     EX_PROCESS_API = "EX_PROCESS_API"
+    EX_PROCESS_API_TENSOR_STREAM = "EX_PROCESS_API_TENSOR_STREAM"
 
 
 class APIContext:
@@ -59,5 +61,7 @@ class APIContext:
             if not isinstance(api, InProcessClientAPI):
                 raise RuntimeError(f"api {api} is not a valid InProcessClientAPI")
             return api
+        elif api_type == ClientAPIType.EX_PROCESS_API_TENSOR_STREAM:
+            return ExProcessTensorStreamClientAPI(config_file=self.config_file)
         else:
             return ExProcessClientAPI(config_file=self.config_file)

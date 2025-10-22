@@ -143,6 +143,7 @@ class BaseScriptRunner:
         else:
             raise ValueError(f"Framework {self._framework} unsupported")
 
+        # TODO: add support for tensor stream pipe here
         if launch_external_process:
             if metric_pipe is not None:
                 validate_object_for_job("metric_pipe", metric_pipe, Pipe)
@@ -200,6 +201,7 @@ class BaseScriptRunner:
         tasks = kwargs.get("tasks", ["*"])
         comp_ids = {}
 
+        # TODO: add support for tensor stream pipe
         if self._launch_external_process:
             task_pipe = self._task_pipe if self._task_pipe else self._create_cell_pipe()
             task_pipe_id = job.add_component("pipe", task_pipe, ctx)

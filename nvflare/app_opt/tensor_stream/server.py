@@ -36,7 +36,7 @@ class TensorServerStreamer(FLComponent):
     It uses a StreamableEngine, TensorReceiver, and TensorSender to manage tensor streaming on the server side.
     Attributes:
         format (str): The format of the tensors to send/receive. Default is "pytorch".
-        entry_timeout (float): Timeout for tensor entry transfer operations. Default is 30.0 seconds.
+        entry_timeout (float): Timeout for tensor entry transfer operations. Default is 60.0 seconds.
         engine (StreamableEngine): The StreamableEngine used for tensor streaming.
         sender (TensorSender): The TensorSender used to send tensors to clients.
         receiver (TensorReceiver): The TensorReceiver used to receive tensors from clients.
@@ -59,7 +59,7 @@ class TensorServerStreamer(FLComponent):
         self,
         format: ExchangeFormat = ExchangeFormat.PYTORCH,
         tasks: list[str] = None,
-        entry_timeout: float = 30.0,
+        entry_timeout: float = 60.0,
         wait_send_task_data_all_clients_timeout: float = 300.0,
     ):
         """Initialize the TensorServerStreamer component.
