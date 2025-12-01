@@ -211,7 +211,13 @@ def update_params_with_tensors(
 
     for k, tensor in tensors.items():
         if to_ndarray:
-            cur[k] = tensor.cpu().numpy() if tensor.is_cuda else tensor.numpy()
+            # Use .numpy() for CPU tensors (zero-copy), .cpu().numpy() for GPU
+            if tensor.is_cuda:
+                cpu_tensor = tensor.cpu()
+                cur[k] = cpu_tensor.numpy()
+                del cpu_tensor  # Release intermediate CPU tensor
+            else:
+                cur[k] = tensor.numpy()
         else:
             cur[k] = tensor
 
@@ -246,7 +252,13 @@ def merge_params_dicts(
         else:
             # Leaf value (tensor or other type)
             if to_ndarray and isinstance(value, torch.Tensor):
-                base_params[key] = value.cpu().numpy() if value.is_cuda else value.numpy()
+                # Use .numpy() for CPU tensors (zero-copy view), .cpu().numpy() for GPU
+                if value.is_cuda:
+                    cpu_tensor = value.cpu()
+                    base_params[key] = cpu_tensor.numpy()
+                    del cpu_tensor  # Release intermediate CPU tensor
+                else:
+                    base_params[key] = value.numpy()
             else:
                 base_params[key] = value
     return base_params

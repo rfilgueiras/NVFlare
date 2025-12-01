@@ -100,11 +100,12 @@ class TensorReceiver:
         if not tensors:
             raise ValueError(f"No tensors found from peer '{peer_name}' and task '{task_id}'.")
 
-        # Clean up custom properties to reduce memory usage
+        # Store tensors before cleaning up custom properties
+        self.on_tensor_received(task_id, tensors)
+
+        # Clean up custom properties immediately to reduce memory usage
         fl_ctx.set_custom_prop(TensorCustomKeys.SAFE_TENSORS_PROP_KEY, None)
         fl_ctx.set_custom_prop(TensorCustomKeys.TASK_ID, None)
-
-        self.on_tensor_received(task_id, tensors)
         del tensors
 
     def set_ctx_with_tensors(self, fl_ctx: FLContext):
@@ -160,10 +161,15 @@ class TensorReceiver:
         s["DXO"] = dxo
         fl_ctx.set_prop(self.ctx_prop_key, s, private=True, sticky=False)
 
-        # Explicitly delete local reference to aid garbage collection
+        # Explicitly delete local references to aid garbage collection
         del tensors
+        # Clear the DXO reference to avoid keeping it in memory
+        dxo = None
         if task_id in self.tensor_events:
             del self.tensor_events[task_id]
+        # Also clear error events for this task
+        if task_id in self.error_events:
+            del self.error_events[task_id]
 
         self.logger.info(
             f"Peer '{fl_ctx.get_identity_name()}': updated task data with tensors received from peer "

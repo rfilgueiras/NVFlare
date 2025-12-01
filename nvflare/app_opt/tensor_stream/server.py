@@ -145,7 +145,13 @@ class TensorServerStreamer(FLComponent):
             # it can happen when the aggregator only accepts part of the clients
             for task_id in self.seen_tasks[current_round]:
                 if task_id in self.receiver.tensors:
-                    self.receiver.tensors.pop(task_id)
+                    tensors = self.receiver.tensors.pop(task_id)
+                    del tensors  # Explicitly delete to release memory
+                # Also clean up any pending events for this task
+                if task_id in self.receiver.tensor_events:
+                    del self.receiver.tensor_events[task_id]
+                if task_id in self.receiver.error_events:
+                    del self.receiver.error_events[task_id]
 
             self.clean_counters(current_round)
 

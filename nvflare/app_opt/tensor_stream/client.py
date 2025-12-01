@@ -123,5 +123,7 @@ class TensorClientStreamer(FLComponent):
         else:
             clean_task_result(fl_ctx)
         finally:
-            # Clear sender to release any references to tensors
+            # Clear sender and its task_params to release any references to tensors
+            if self.sender and hasattr(self.sender, "task_params"):
+                self.sender.task_params.clear()
             self.sender = None

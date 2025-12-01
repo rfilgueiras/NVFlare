@@ -73,6 +73,7 @@ class TensorSender:
         params = dxo.data
         self.task_params[task_id] = params
         self.logger.info(f"Stored reference to params to be sent to peer '{peer_name}'. Task ID: '{task_id}'.")
+        # Explicitly delete local reference and DXO data to release memory
         del params
 
     def send(
