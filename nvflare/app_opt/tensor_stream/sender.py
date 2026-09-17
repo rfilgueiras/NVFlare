@@ -99,6 +99,9 @@ class TensorSender:
             raise ValueError(f"No tensors stored for peer '{peer_name}'. Task ID: '{task_id}'.")
 
         producer = TensorProducer(params, task_id, tensor_send_timeout)
+        # Release the local reference immediately — only the generator inside
+        # TensorProducer needs the tensors from this point on.
+        del params
         msg = f"Starting to send tensors to peer '{peer_name}'."
         msg += f" Task ID: '{task_id}'."
         self.logger.info(msg)
