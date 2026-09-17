@@ -164,11 +164,18 @@ class TensorServerStreamer(FLComponent):
             self.seen_tasks[current_round].add(task_id)
         elif event_type == EventType.AFTER_TASK_DATA_FILTER:
             # Store tensors after filtering (to get the filtered reference)
-            # Then send to each client
+            # Then send to each client.
+            # Note: stream_objects() inside send_tensors_to_client() is synchronous —
+            # it blocks until the current client has received all tensors. The counter
+            # in try_to_clean_task_data() already ensures clean_task_data() is only
+            # called once all N clients are done. The explicit
+            # wait_sending_task_data_all_clients() barrier is therefore redundant: it
+            # forced every server thread to wait for the slowest client before returning,
+            # adding unnecessary per-round latency and holding tensor references in
+            # memory longer than needed.
             self.sender.store_tensors(fl_ctx)
             self.send_tensors_to_client(fl_ctx)
             num_clients = len(self.engine.get_clients())
-            self.wait_sending_task_data_all_clients(num_clients, fl_ctx)
             self.try_to_clean_task_data(num_clients, fl_ctx)
         elif event_type == EventType.BEFORE_TASK_RESULT_FILTER:
             task_id = fl_ctx.get_prop(FLContextKey.TASK_ID)

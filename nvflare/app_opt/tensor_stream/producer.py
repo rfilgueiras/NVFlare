@@ -64,7 +64,6 @@ class TensorProducer(ObjectProducer):
         # The generator will handle serialization and the tensors can be garbage collected
         # after the generator completes.
         self.chunks_generator = chunk_tensors_from_params(tensors)
-        self.tensors_keys = list(tensors.keys())
         self.logger = get_obj_logger(self)
 
     def produce(
@@ -95,7 +94,26 @@ class TensorProducer(ObjectProducer):
                 self.log_completion(fl_ctx)
                 return None, self.tensor_send_timeout
 
-            tensors_blob = save_tensors(tensors)
+            # Resolve weight-tied tensors before serialisation.
+            # Models such as GPT-2 share storage between parameters (e.g.
+            # lm_head.weight and transformer.wte.weight). safetensors refuses
+            # to serialise two keys that point to the same storage. Clone the
+            # duplicate(s) to break the tie while keeping the original intact.
+            seen_ptrs: dict[int, str] = {}
+            resolved_tensors = {}
+            for k, t in tensors.items():
+                ptr = t.data_ptr()
+                if ptr in seen_ptrs:
+                    resolved_tensors[k] = t.clone()
+                    self.logger.debug(
+                        f"Cloned weight-tied tensor '{k}' (shares storage with '{seen_ptrs[ptr]}')"
+                    )
+                else:
+                    seen_ptrs[ptr] = k
+                    resolved_tensors[k] = t
+
+            tensors_blob = save_tensors(resolved_tensors)
+            del resolved_tensors
             data[TensorBlobKeys.SAFETENSORS_BLOB] = tensors_blob
             data[TensorBlobKeys.TENSOR_KEYS] = list(tensors.keys())
             data[TensorBlobKeys.PARENT_KEYS] = parent_keys
