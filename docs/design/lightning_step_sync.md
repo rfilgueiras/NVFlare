@@ -223,6 +223,16 @@ checks, the algorithm handlers, the metadata handling and the step counting, and
 
 ## Memory
 
+Compared with one `fit()` per round, step mode uses less host memory and less time per round, and the same GPU
+memory:
+
+- **Host memory:** no `RestoreState` copy of the optimizer state, which today is held per rank for the whole job.
+  Adam keeps two state tensors per weight, so for Adam that copy is about twice the size of the weights, on every
+  rank.
+- **Time:** no move of the module and the optimizer state to CPU and back, and no per-`fit()` setup, at each round.
+- **GPU memory:** the optimizer state is on the GPU during training in both modes. The temporary broadcast buffer
+  described below exists in both modes, but step mode allocates it at every sync instead of once per `fit()`.
+
 Per sync, with M the size of the state dict:
 
 | Phase | Step mode | Fit-per-round mode, today |
