@@ -19,6 +19,9 @@ At each sync, training pauses, sends the local model, loads the next global mode
 same optimizer, LR scheduler, AMP scaler and data position. Three hooks at the sync point let user code extend the
 payload or react to a new global model without forking `FLCallback`.
 
+Compared with today's only way to get short rounds, one `fit()` per round, this uses less host memory and less time
+per round, and the same GPU memory (see [Memory](#memory)).
+
 ## Background
 
 `FLCallback` (`nvflare/app_opt/lightning/api.py`) receives in `on_train_start` and sends in `on_train_end`, so one FL
