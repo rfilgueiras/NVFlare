@@ -33,8 +33,8 @@ The only way to get short rounds today is `Trainer(max_steps=N)` with one `fit()
 | Effect | Consequence |
 | --- | --- |
 | Starts a new epoch from the first batch | Without shuffling, the same first N batches train every round and the rest of the data is never seen; with shuffling, epochs stop meaning a pass over the data |
-| Rebuilds the optimizer and LR scheduler | State survives only through `RestoreState`, which keeps a `deepcopy` of all optimizer state on the training device between rounds (2× the parameters for Adam) |
-| Re-runs the per-fit setup | Dataloader workers, `setup`/`teardown`, and on GPU a round trip of the module to CPU (`pl_module.cpu()` before each send) |
+| Rebuilds the optimizer and LR scheduler | State survives only through `RestoreState`, which keeps a host-memory `deepcopy` of all optimizer state for the whole job (for Adam, about twice the size of the weights) |
+| Re-runs the per-fit setup | Dataloader workers, `setup`/`teardown`, and on GPU a round trip to CPU of the module (`pl_module.cpu()` before each send) and of the optimizer state (Lightning's teardown) |
 
 Step-bounded rounds also hit a round-length bug, fixed separately (#5453).
 
@@ -231,7 +231,7 @@ Per sync, with M the size of the state dict:
 | Receive (rank 0) | The received model, +M host memory, held in the Client API cache until the round is sent | Same |
 | Broadcast | `broadcast_object_list` pickles the model: about +M host memory on each rank; with NCCL, the pickled bytes are staged on each rank's GPU, about +M GPU memory for the duration of the broadcast | Same, once per round at `fit()` start |
 | Load | `load_state_dict` copies into the existing parameters; no new GPU memory | Same |
-| Optimizer | Lives through the single `fit()`; no copy | `RestoreState` keeps a `deepcopy` of the optimizer state on the training device between rounds |
+| Optimizer | Lives through the single `fit()` on the training device; no copy | Lightning's teardown moves the optimizer state to CPU at every `fit()` end, where `RestoreState` keeps a `deepcopy` for the whole job (about 2× the weights for Adam), restored to the device at the next `fit()` |
 | FedProx | Keeps the global weights on the training device during each round (+M GPU), as today | Same |
 
 Payload extras added through `on_fl_before_send` (EMA weights) add their own size to the send.
